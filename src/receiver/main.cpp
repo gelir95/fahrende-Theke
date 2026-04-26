@@ -101,8 +101,8 @@ int rampToZero(int val, int step) {
   return 0;
 }
 
-void OnDataRecv(const esp_now_recv_info_t *recv_info, const uint8_t *incomingData, int len) {
-  const uint8_t *mac = recv_info->src_addr;
+// Core 2.x Signatur (Bluepad32 Arduino Framework basiert auf Core 2.x)
+void OnDataRecv(const uint8_t *mac, const uint8_t *incomingData, int len) {
   unsigned long now = millis();
 
   // Sender-Lock: kein aktiver Sender oder Timeout -> neuen Sender annehmen

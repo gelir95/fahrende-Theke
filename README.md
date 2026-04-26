@@ -81,24 +81,37 @@ Vor dem ersten Einsatz die MAC-Adresse des Receiver-Boards auslesen und in `src/
 
 Bluepad32 ermöglicht die Verbindung eines Xbox-Controllers per Bluetooth direkt auf dem Receiver-ESP32, parallel zu ESP-NOW.
 
-### 1. lib_deps in platformio.ini eintragen
+### Aktuelle Einschränkung
+
+Das offizielle Bluepad32-Arduino-Paket basiert derzeit auf **Arduino-ESP32 Core 2.x**. Der Receiver nutzt deshalb ein angepasstes Framework-Paket (Repackaging von maxgerhardt), das Bluepad32 bereits eingebaut hat.
+
+Das ist in `platformio.ini` so eingebunden:
 
 ```ini
 [env:receiver]
-...
-lib_deps = https://github.com/ricardoquesada/bluepad32.git
+platform = espressif32@6.10.0
+platform_packages =
+    framework-arduinoespressif32@https://github.com/maxgerhardt/pio-framework-bluepad32/archive/refs/heads/main.zip
 ```
 
-### 2. BP32.update() im Loop aufrufen
+### Upgrade auf Core 3.x (sobald verfügbar)
 
-```cpp
-#include <Bluepad32.h>
+Sobald [ricardoquesada/esp32-arduino-lib-builder](https://github.com/ricardoquesada/esp32-arduino-lib-builder/releases) ein Core-3.x-Paket veröffentlicht:
 
-void loop() {
-  BP32.update();
-  // Controller-Daten über BP32.myControllers() abrufen
-}
-```
+1. `platform_packages` aus `platformio.ini` entfernen
+2. `platform` zurück auf pioarduino setzen:
+   ```ini
+   platform = https://github.com/pioarduino/platform-espressif32/releases/download/55.03.37/platform-espressif32.zip
+   ```
+3. ESP-NOW Callback in `src/receiver/main.cpp` auf Core 3.x anpassen:
+   ```cpp
+   // Core 2.x (aktuell):
+   void OnDataRecv(const uint8_t *mac, const uint8_t *incomingData, int len)
+
+   // Core 3.x (nach Upgrade):
+   void OnDataRecv(const esp_now_recv_info_t *recv_info, const uint8_t *incomingData, int len)
+   // mac = recv_info->src_addr
+   ```
 
 > **Hinweis**: Bluepad32 und ESP-NOW können parallel laufen — der ESP32 teilt das 2,4-GHz-Radio zwischen WiFi (ESP-NOW) und Bluetooth. Beide funktionieren gleichzeitig, können aber gelegentlich zu leicht erhöhter Latenz führen.
 
