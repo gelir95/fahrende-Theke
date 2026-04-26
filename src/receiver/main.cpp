@@ -51,16 +51,19 @@ bool macEqual(const uint8_t *a, const uint8_t *b) {
   return true;
 }
 
+// Expo-Kurve: output = expo * x^3 + (1 - expo) * x  (normalisiert auf maxVal)
 int applyExpo(int input, int maxVal, float expo) {
   float norm   = (float)input / (float)maxVal;
   float curved = expo * norm * norm * norm + (1.0f - expo) * norm;
   return (int)(curved * (float)maxVal);
 }
 
+// Einen Schritt von current Richtung target, mit unterschiedlichen Raten für Accel/Decel
 int rampToward(int current, int target, int accelStep, int decelStep) {
   int diff = target - current;
   if (diff == 0) return current;
 
+  // Weg von 0 = beschleunigen, Richtung 0 = verzögern
   bool accelerating = (diff > 0 && current >= 0) || (diff < 0 && current <= 0);
   int step = accelerating ? accelStep : decelStep;
 
@@ -79,16 +82,19 @@ void OnDataRecv(const esp_now_recv_info_t *recv_info, const uint8_t *incomingDat
   const uint8_t *mac = recv_info->src_addr;
   unsigned long now = millis();
 
+  // Sender-Lock: kein aktiver Sender oder Timeout -> neuen Sender annehmen
   if (!hasSender || (now - lastPacketMillis > SENDER_TIMEOUT)) {
     memcpy(activeSenderMAC, mac, 6);
     hasSender = true;
   }
 
+  // Pakete von anderen Sendern ignorieren
   if (!macEqual(mac, activeSenderMAC)) return;
 
   memcpy(&myData, incomingData, sizeof(myData));
   lastPacketMillis = now;
 
+  // Expo anwenden -> wird Zielwert für den Ramp
   targetVR = applyExpo(myData.msg_vr, 2047, EXPO_VR);
   targetRL = applyExpo(myData.msg_rl, 1300, EXPO_RL);
 
@@ -99,8 +105,8 @@ void setup() {
   Serial.begin(9600);
   WiFi.mode(WIFI_STA);
   delay(1000);
-  Serial.println("MD:startup");
-  Serial.println("MT:startup");
+  Serial.println("VR:startup");
+  Serial.println("RL:startup");
 
   if (esp_now_init() != ESP_OK) return;
   esp_now_register_recv_cb(OnDataRecv);
@@ -126,17 +132,21 @@ void loop() {
       currentVR = rampToZero(currentVR, SIGNAL_LOSS_DECEL_STEP);
       currentRL = 0;
     } else {
+      // Notbremsung: Joystick >= EMERGENCY_THRESHOLD in Gegenrichtung -> sofort auf 0
       bool emBrakeVR = (currentVR != 0)
                     && (abs(targetVR) >= (int)(EMERGENCY_THRESHOLD * 2047))
                     && ((targetVR >= 0) != (currentVR >= 0));
 
+      // VR: Ramp + Notbremsung
       currentVR = emBrakeVR ? 0 : rampToward(currentVR, targetVR, ACCEL_STEP, DECEL_STEP);
+
+      // RL: direkte Übertragung (Lenken braucht sofortige Reaktion)
       currentRL = targetRL;
     }
 
-    Serial.print("MD:");
+    Serial.print("VR:");
     Serial.println(currentVR);
-    Serial.print("MT:");
+    Serial.print("RL:");
     Serial.println(currentRL);
   }
 }
