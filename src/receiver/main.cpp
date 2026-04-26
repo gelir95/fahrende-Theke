@@ -1,17 +1,6 @@
-/*
-  Rui Santos
-  Complete project details at https://RandomNerdTutorials.com/esp-now-esp32-arduino-ide/
-
-  Permission is hereby granted, free of charge, to any person obtaining a copy
-  of this software and associated documentation files.
-
-  The above copyright notice and this permission notice shall be included in all
-  copies or substantial portions of the Software.
-*/
-
+#include <Arduino.h>
 #include <esp_now.h>
 #include <WiFi.h>
-
 #define Hupe 5
 
 // Sender switching
@@ -62,19 +51,16 @@ bool macEqual(const uint8_t *a, const uint8_t *b) {
   return true;
 }
 
-// Expo-Kurve: output = expo * x^3 + (1 - expo) * x  (normalisiert auf maxVal)
 int applyExpo(int input, int maxVal, float expo) {
   float norm   = (float)input / (float)maxVal;
   float curved = expo * norm * norm * norm + (1.0f - expo) * norm;
   return (int)(curved * (float)maxVal);
 }
 
-// Einen Schritt von current Richtung target, mit unterschiedlichen Raten für Accel/Decel
 int rampToward(int current, int target, int accelStep, int decelStep) {
   int diff = target - current;
   if (diff == 0) return current;
 
-  // Weg von 0 = beschleunigen, Richtung 0 = verzögern
   bool accelerating = (diff > 0 && current >= 0) || (diff < 0 && current <= 0);
   int step = accelerating ? accelStep : decelStep;
 
@@ -93,19 +79,16 @@ void OnDataRecv(const esp_now_recv_info_t *recv_info, const uint8_t *incomingDat
   const uint8_t *mac = recv_info->src_addr;
   unsigned long now = millis();
 
-  // Sender-Lock: kein aktiver Sender oder Timeout -> neuen Sender annehmen
   if (!hasSender || (now - lastPacketMillis > SENDER_TIMEOUT)) {
     memcpy(activeSenderMAC, mac, 6);
     hasSender = true;
   }
 
-  // Pakete von anderen Sendern ignorieren
   if (!macEqual(mac, activeSenderMAC)) return;
 
   memcpy(&myData, incomingData, sizeof(myData));
   lastPacketMillis = now;
 
-  // Expo anwenden -> wird Zielwert für den Ramp
   targetVR = applyExpo(myData.msg_vr, 2047, EXPO_VR);
   targetRL = applyExpo(myData.msg_rl, 1300, EXPO_RL);
 
@@ -143,15 +126,11 @@ void loop() {
       currentVR = rampToZero(currentVR, SIGNAL_LOSS_DECEL_STEP);
       currentRL = 0;
     } else {
-      // Notbremsung: Joystick >= EMERGENCY_THRESHOLD in Gegenrichtung -> sofort auf 0
-      // VR: Ramp + Notbremsung
       bool emBrakeVR = (currentVR != 0)
                     && (abs(targetVR) >= (int)(EMERGENCY_THRESHOLD * 2047))
                     && ((targetVR >= 0) != (currentVR >= 0));
 
       currentVR = emBrakeVR ? 0 : rampToward(currentVR, targetVR, ACCEL_STEP, DECEL_STEP);
-
-      // RL: direkte Übertragung (Lenken braucht sofortige Reaktion)
       currentRL = targetRL;
     }
 
