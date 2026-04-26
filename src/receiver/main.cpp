@@ -37,6 +37,7 @@ int targetVR  = 0;
 int targetRL  = 0;
 int currentVR = 0;
 int currentRL = 0;
+bool waitForNeutralVR = false;
 
 typedef struct struct_message {
     int msg_vr;
@@ -137,8 +138,17 @@ void loop() {
                     && (abs(targetVR) >= (int)(EMERGENCY_THRESHOLD * 2047))
                     && ((targetVR >= 0) != (currentVR >= 0));
 
-      // VR: Ramp + Notbremsung
-      currentVR = emBrakeVR ? 0 : rampToward(currentVR, targetVR, ACCEL_STEP, DECEL_STEP);
+      if (emBrakeVR) {
+        currentVR = 0;
+        waitForNeutralVR = true;
+      }
+
+      // VR: erst wieder fahren wenn Joystick auf 0 war (verhindert versehentliches Rückwärtsfahren)
+      if (waitForNeutralVR) {
+        if (targetVR == 0) waitForNeutralVR = false;
+      } else if (!emBrakeVR) {
+        currentVR = rampToward(currentVR, targetVR, ACCEL_STEP, DECEL_STEP);
+      }
 
       // RL: direkte Übertragung (Lenken braucht sofortige Reaktion)
       currentRL = targetRL;
