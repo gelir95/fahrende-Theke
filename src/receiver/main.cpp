@@ -1,6 +1,8 @@
 #include <Arduino.h>
 #include <esp_now.h>
 #include <WiFi.h>
+#include <Bluepad32.h>
+
 #define Hupe 5
 
 // Sender switching
@@ -27,17 +29,19 @@
 #define EXPO_VR         0.5f
 #define EXPO_RL         0.5f
 
+ControllerPtr myControllers[BP32_MAX_GAMEPADS];
+
 unsigned long lastPacketMillis = 0;
 unsigned long lastRampMillis   = 0;
 
 uint8_t activeSenderMAC[6] = {0};
-bool hasSender = false;
+bool hasSender        = false;
+bool waitForNeutralVR = false;
 
 int targetVR  = 0;
 int targetRL  = 0;
 int currentVR = 0;
 int currentRL = 0;
-bool waitForNeutralVR = false;
 
 typedef struct struct_message {
     int msg_vr;
@@ -46,6 +50,24 @@ typedef struct struct_message {
 } struct_message;
 
 struct_message myData;
+
+void onConnectedController(ControllerPtr ctl) {
+    for (int i = 0; i < BP32_MAX_GAMEPADS; i++) {
+        if (myControllers[i] == nullptr) {
+            myControllers[i] = ctl;
+            return;
+        }
+    }
+}
+
+void onDisconnectedController(ControllerPtr ctl) {
+    for (int i = 0; i < BP32_MAX_GAMEPADS; i++) {
+        if (myControllers[i] == ctl) {
+            myControllers[i] = nullptr;
+            return;
+        }
+    }
+}
 
 bool macEqual(const uint8_t *a, const uint8_t *b) {
   for (int i = 0; i < 6; i++) if (a[i] != b[i]) return false;
@@ -94,12 +116,6 @@ void OnDataRecv(const esp_now_recv_info_t *recv_info, const uint8_t *incomingDat
 
   memcpy(&myData, incomingData, sizeof(myData));
   lastPacketMillis = now;
-
-  // Expo anwenden -> wird Zielwert für den Ramp
-  targetVR = applyExpo(myData.msg_vr, 2047, EXPO_VR);
-  targetRL = applyExpo(myData.msg_rl, 1300, EXPO_RL);
-
-  digitalWrite(Hupe, myData.hupe ? HIGH : LOW);
 }
 
 void setup() {
@@ -112,13 +128,43 @@ void setup() {
   if (esp_now_init() != ESP_OK) return;
   esp_now_register_recv_cb(OnDataRecv);
 
+  BP32.setup(&onConnectedController, &onDisconnectedController);
+
   pinMode(Hupe, OUTPUT);
   delay(200);
 }
 
 void loop() {
+  BP32.update();
   unsigned long now = millis();
-  bool signalLost = (now - lastPacketMillis >= SIGNAL_TIMEOUT);
+
+  // Eingabequelle: Bluetooth-Controller hat Vorrang vor ESP-NOW
+  bool btActive = false;
+  for (auto ctl : myControllers) {
+    if (ctl && ctl->isConnected()) {
+      btActive = true;
+      // Linker Stick Y -> VR (invertiert: Stick vorwärts = positiver Wert)
+      int rawVR = map(ctl->axisY(), -512, 511, 2047, -2047);
+      // Linker Stick X -> RL
+      int rawRL = map(ctl->axisX(), -512, 511, -1300, 1300);
+      targetVR = applyExpo(rawVR, 2047, EXPO_VR);
+      targetRL = applyExpo(rawRL, 1300, EXPO_RL);
+      // A-Taste -> Hupe
+      digitalWrite(Hupe, ctl->a() ? HIGH : LOW);
+      break;
+    }
+  }
+
+  bool signalLost = false;
+  if (!btActive) {
+    signalLost = (now - lastPacketMillis >= SIGNAL_TIMEOUT);
+    if (!signalLost) {
+      // Expo anwenden -> wird Zielwert für den Ramp
+      targetVR = applyExpo(myData.msg_vr, 2047, EXPO_VR);
+      targetRL = applyExpo(myData.msg_rl, 1300, EXPO_RL);
+      digitalWrite(Hupe, myData.hupe ? HIGH : LOW);
+    }
+  }
 
   if (signalLost) {
     digitalWrite(Hupe, LOW);
@@ -147,6 +193,7 @@ void loop() {
       if (waitForNeutralVR) {
         if (targetVR == 0) waitForNeutralVR = false;
       } else if (!emBrakeVR) {
+        // VR: normales Fahren/Beschleunigen per Ramp
         currentVR = rampToward(currentVR, targetVR, ACCEL_STEP, DECEL_STEP);
       }
 
