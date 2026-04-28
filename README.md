@@ -12,6 +12,7 @@ Zwei ESP32-Boards kommunizieren über ESP-NOW (kein Router nötig):
 ### Funktionen
 
 - **Expo-Kurve**: Nicht-linearer Joystick-Response — kleine Ausschläge reagieren sanft, voller Ausschlag gibt vollen Wert
+- **Totzone (Deadzone)**: Eingaben unter einem konfigurierbaren Schwellwert werden als 0 behandelt — verhindert Drift bei losgelassenem Stick (`DEADZONE_VR`, `DEADZONE_RL` in Prozent des Maximalwerts)
 - **Beschleunigungs-/Verzögerungs-Ramp**: Werte ändern sich schrittweise, kein abruptes Umschalten
 - **Signalverlust-Failsafe**: Kein Paket seit 200ms → Motor bremst kontrolliert auf 0
 - **Notbremsung**: Joystick ≥98% in Gegenrichtung → sofortiger Stopp

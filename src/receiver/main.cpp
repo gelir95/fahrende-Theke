@@ -29,6 +29,11 @@
 #define EXPO_VR         0.5f
 #define EXPO_RL         0.5f
 
+// Totzone: Eingaben kleiner als X% des Maximalwerts werden als 0 behandelt
+// Verhindert Controller-Drift bei losgelassenem Stick
+#define DEADZONE_VR     0.08f   // 8% von 2047 = ~164
+#define DEADZONE_RL     0.08f   // 8% von 1300 = ~104
+
 ControllerPtr myControllers[BP32_MAX_GAMEPADS];
 
 unsigned long lastPacketMillis = 0;
@@ -75,7 +80,9 @@ bool macEqual(const uint8_t *a, const uint8_t *b) {
 }
 
 // Expo-Kurve: output = expo * x^3 + (1 - expo) * x  (normalisiert auf maxVal)
-int applyExpo(int input, int maxVal, float expo) {
+// Totzone: Eingaben innerhalb der Deadzone werden als 0 behandelt
+int applyExpo(int input, int maxVal, float expo, float deadzone) {
+  if (abs(input) < (int)(deadzone * maxVal)) return 0;
   float norm   = (float)input / (float)maxVal;
   float curved = expo * norm * norm * norm + (1.0f - expo) * norm;
   return (int)(curved * (float)maxVal);
@@ -147,8 +154,8 @@ void loop() {
       int rawVR = map(ctl->axisY(), -512, 511, 2047, -2047);
       // Linker Stick X -> RL
       int rawRL = map(ctl->axisX(), -512, 511, -1300, 1300);
-      targetVR = applyExpo(rawVR, 2047, EXPO_VR);
-      targetRL = applyExpo(rawRL, 1300, EXPO_RL);
+      targetVR = applyExpo(rawVR, 2047, EXPO_VR, DEADZONE_VR);
+      targetRL = applyExpo(rawRL, 1300, EXPO_RL, DEADZONE_RL);
       // A-Taste -> Hupe
       digitalWrite(Hupe, ctl->a() ? HIGH : LOW);
       break;
@@ -160,8 +167,8 @@ void loop() {
     signalLost = (now - lastPacketMillis >= SIGNAL_TIMEOUT);
     if (!signalLost) {
       // Expo anwenden -> wird Zielwert für den Ramp
-      targetVR = applyExpo(myData.msg_vr, 2047, EXPO_VR);
-      targetRL = applyExpo(myData.msg_rl, 1300, EXPO_RL);
+      targetVR = applyExpo(myData.msg_vr, 2047, EXPO_VR, DEADZONE_VR);
+      targetRL = applyExpo(myData.msg_rl, 1300, EXPO_RL, DEADZONE_RL);
       digitalWrite(Hupe, myData.hupe ? HIGH : LOW);
     }
   }
