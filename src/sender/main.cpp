@@ -1,7 +1,6 @@
 #include <Arduino.h>
 #include <esp_now.h>
 #include <WiFi.h>
-
 // Fuer echte Hardware: Empfaenger-MAC eintragen
 // Fuer Wokwi-Test: Broadcast (verbindet sich mit jedem ESP32 in Reichweite)
 uint8_t broadcastAddress[] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
@@ -38,7 +37,6 @@ void setup() {
     Serial.println("Error initializing ESP-NOW");
     return;
   }
-
   esp_now_register_send_cb(OnDataSent);
 
   memcpy(peerInfo.peer_addr, broadcastAddress, 6);
