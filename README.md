@@ -39,8 +39,8 @@ Zwei ESP32-Boards kommunizieren über ESP-NOW (kein Router nötig):
 ### Serielle Ausgabe (Receiver)
 
 ```
-VR:-1842    <- vor/zurück (-2047 bis +2047)
-RL:+650     <- rechts/links (-1300 bis +1300)
+MD:-1842    <- vor/zurück (-2047 bis +2047)
+MT:+650     <- rechts/links (-1300 bis +1300)
 ```
 
 ### Weboberfläche (Receiver)

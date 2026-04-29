@@ -353,8 +353,8 @@ void setup() {
   Serial.println(WiFi.softAPIP());
 
   delay(1000);
-  Serial.println("VR:startup");
-  Serial.println("RL:startup");
+  Serial.println("MD:startup");
+  Serial.println("MT:startup");
 
   if (esp_now_init() != ESP_OK) return;
   esp_now_register_recv_cb(OnDataRecv);
@@ -443,9 +443,9 @@ void loop() {
       currentRL = targetRL;
     }
 
-    Serial.print("VR:");
+    Serial.print("MD:");
     Serial.println(currentVR);
-    Serial.print("RL:");
+    Serial.print("MT:");
     Serial.println(currentRL);
   }
 }
