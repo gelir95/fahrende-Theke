@@ -15,7 +15,8 @@ Zwei ESP32-Boards kommunizieren über ESP-NOW (kein Router nötig):
 - **Totzone (Deadzone)**: Eingaben unter einem konfigurierbaren Schwellwert werden als 0 behandelt — verhindert Drift bei losgelassenem Stick
 - **Hysterese (RL)**: Die RL-Deadzone verwendet eine Hysterese (130%/100%) um Flackern an der Grenze zu verhindern
 - **Beschleunigungs-/Verzögerungs-Ramp**: VR-Werte ändern sich schrittweise, RL reagiert direkt (Lenken)
-- **Signalverlust-Failsafe**: Kein Paket seit 300ms → Motor bremst kontrolliert auf 0
+- **Hupe mit Timer**: Tastendruck triggert die Hupe für eine einstellbare Dauer (Standard 10 s) — kein Halten nötig, während die Hupe läuft wird weiterer Druck ignoriert
+- **Signalverlust-Failsafe**: Kein Paket seit 300ms → Motor bremst kontrolliert auf 0, Hupe stoppt
 - **Notbremsung**: Joystick ≥98% in Gegenrichtung → sofortiger Stopp, Wiederfahrt erst nach Neutralstellung
 - **MAC-Lock**: Receiver akzeptiert nur den ersten Sender der sich meldet, ignoriert andere (Timeout: 300ms)
 - **Weboberfläche**: Alle Parameter live einstellbar über `192.168.4.1` (WLAN: `FahrendeTheke` / `fahrende123`)
@@ -55,7 +56,7 @@ Der Receiver öffnet beim Start immer einen WLAN-Access-Point:
 
 ![Weboberfläche](docs/web.jpeg)
 
-Über die Weboberfläche einstellbar (live, ohne Neustart):
+Über die Weboberfläche einstellbar (live, ohne Neustart). Alle Werte werden im Flash (NVS) gespeichert und überleben einen Neustart:
 
 | Parameter | Beschreibung | Standard |
 |-----------|-------------|---------|
@@ -65,6 +66,7 @@ Der Receiver öffnet beim Start immer einen WLAN-Access-Point:
 | `expoVR` / `expoRL` | Expo-Kurve (0=linear, 1=kubisch) | 0.5 |
 | `deadzoneVR` / `deadzoneRL` | Totzone (Anteil am Maximalwert) | 0.08 |
 | `emergencyThreshold` | Schwelle Gegenrichtungs-Notbremse | 0.98 |
+| `hupeSeconds` | Hupendauer nach Tastendruck (s) | 10 |
 
 ---
 

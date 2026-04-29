@@ -3,6 +3,7 @@
 #include <WiFi.h>
 #include <WebServer.h>
 #include <Bluepad32.h>
+#include <Preferences.h>
 
 #define Hupe 5
 
@@ -31,6 +32,9 @@ int signalLossDecelStep = 200;   // Verzögerung während Signalverlust (~220ms 
 // Per Weboberfläche live einstellbar
 float emergencyThreshold = 0.98f;
 
+// Hupe: Dauer in Sekunden nach Tastendruck (per Weboberfläche einstellbar)
+int hupeSeconds = 10;
+
 // Expo-Kurve (0.0 = linear, 1.0 = rein kubisch)
 // Kleine Ausschläge -> wenig Reaktion, voller Ausschlag -> voller Wert
 // Per Weboberfläche live einstellbar
@@ -43,10 +47,17 @@ float expoRL = 0.5f;
 float deadzoneVR = 0.08f;   // 8% von 2047 = ~164
 float deadzoneRL = 0.08f;   // 8% von 1300 = ~104
 
+Preferences prefs;
+
 ControllerPtr myControllers[BP32_MAX_GAMEPADS];
 
 unsigned long lastPacketMillis = 0;
 unsigned long lastRampMillis   = 0;
+unsigned long hupeStartMillis  = 0;
+
+bool hupeActive = false;
+bool prevHupe   = false;  // ESP-NOW edge detection
+bool prevBtHupe = false;  // BT edge detection
 
 uint8_t activeSenderMAC[6] = {0};
 bool hasSender        = false;
@@ -132,6 +143,7 @@ button.sec:hover{background:#2a2a5a}
   <div class="cell"><div class="cell-label">ESP-NOW</div><div class="cell-val"><span class="dot" id="s-espnow"></span></div></div>
   <div class="cell"><div class="cell-label">Signal OK</div><div class="cell-val"><span class="dot on" id="s-sig"></span></div></div>
   <div class="cell"><div class="cell-label">Notbremse</div><div class="cell-val"><span class="dot" id="s-emb"></span></div></div>
+  <div class="cell"><div class="cell-label">Hupe</div><div class="cell-val"><span class="dot" id="s-hupe"></span></div></div>
 </div>
 
 <h2>Rampe &amp; Beschleunigung</h2>
@@ -147,6 +159,9 @@ button.sec:hover{background:#2a2a5a}
 
 <h2>Notbremsung</h2>
 <div class="row"><label>Schwelle Gegenrichtung</label><input type="number" id="emergencyThreshold" min="0.5" max="1" step="0.01" value="0.98"><span class="unit">0.5–1</span></div>
+
+<h2>Hupe</h2>
+<div class="row"><label>Hupendauer</label><input type="number" id="hupeSeconds" min="1" step="1" value="10"><span class="unit">s</span></div>
 
 <div class="btns">
   <button onclick="apply()">Übernehmen</button>
@@ -172,7 +187,7 @@ button.sec:hover{background:#2a2a5a}
 </div>
 
 <script>
-const PARAMS=['accelStep','decelStep','signalLossDecelStep','emergencyThreshold','expoVR','expoRL','deadzoneVR','deadzoneRL'];
+const PARAMS=['accelStep','decelStep','signalLossDecelStep','emergencyThreshold','expoVR','expoRL','deadzoneVR','deadzoneRL','hupeSeconds'];
 function showTab(t){
   document.querySelectorAll('.tab').forEach((el,i)=>el.classList.toggle('active',['config','info'][i]===t));
   document.querySelectorAll('.page').forEach(el=>el.classList.remove('active'));
@@ -190,6 +205,7 @@ function pollStatus(){
     dot('s-espnow',d.hasSender);
     dot('s-sig',!d.signalLost);
     dot('s-emb',d.waitForNeutralVR);
+    dot('s-hupe',d.hupeActive);
     const tx=d.senderMAC||'—';
     document.getElementById('i-txmac').textContent=tx;
     document.getElementById('i-txmac-c').textContent=macCode(tx);
@@ -235,35 +251,38 @@ void handleStatus() {
   else
     snprintf(txMac, sizeof(txMac), "—");
 
-  char buf[500];
+  char buf[550];
   snprintf(buf, sizeof(buf),
     "{\"currentVR\":%d,\"currentRL\":%d,\"targetVR\":%d,\"targetRL\":%d,"
-    "\"btActive\":%s,\"hasSender\":%s,\"signalLost\":%s,\"waitForNeutralVR\":%s,"
+    "\"btActive\":%s,\"hasSender\":%s,\"signalLost\":%s,\"waitForNeutralVR\":%s,\"hupeActive\":%s,"
     "\"accelStep\":%d,\"decelStep\":%d,\"signalLossDecelStep\":%d,"
     "\"emergencyThreshold\":%.3f,\"expoVR\":%.3f,\"expoRL\":%.3f,"
-    "\"deadzoneVR\":%.3f,\"deadzoneRL\":%.3f,"
+    "\"deadzoneVR\":%.3f,\"deadzoneRL\":%.3f,\"hupeSeconds\":%d,"
     "\"receiverMAC\":\"%s\",\"senderMAC\":\"%s\"}",
     currentVR, currentRL, targetVR, targetRL,
     liveBtActive     ? "true" : "false",
     hasSender        ? "true" : "false",
     liveSignalLost   ? "true" : "false",
     waitForNeutralVR ? "true" : "false",
+    hupeActive       ? "true" : "false",
     accelStep, decelStep, signalLossDecelStep,
     emergencyThreshold, expoVR, expoRL, deadzoneVR, deadzoneRL,
+    hupeSeconds,
     rxMac, txMac
   );
   server->send(200, "application/json", buf);
 }
 
 void handleSet() {
-  if (server->hasArg("accelStep"))           accelStep           = server->arg("accelStep").toInt();
-  if (server->hasArg("decelStep"))           decelStep           = server->arg("decelStep").toInt();
-  if (server->hasArg("signalLossDecelStep")) signalLossDecelStep = server->arg("signalLossDecelStep").toInt();
-  if (server->hasArg("emergencyThreshold"))  emergencyThreshold  = server->arg("emergencyThreshold").toFloat();
-  if (server->hasArg("expoVR"))              expoVR              = server->arg("expoVR").toFloat();
-  if (server->hasArg("expoRL"))              expoRL              = server->arg("expoRL").toFloat();
-  if (server->hasArg("deadzoneVR"))          deadzoneVR          = server->arg("deadzoneVR").toFloat();
-  if (server->hasArg("deadzoneRL"))          deadzoneRL          = server->arg("deadzoneRL").toFloat();
+  if (server->hasArg("accelStep"))           { accelStep           = server->arg("accelStep").toInt();           prefs.putInt(  "accelStep",    accelStep); }
+  if (server->hasArg("decelStep"))           { decelStep           = server->arg("decelStep").toInt();           prefs.putInt(  "decelStep",    decelStep); }
+  if (server->hasArg("signalLossDecelStep")) { signalLossDecelStep = server->arg("signalLossDecelStep").toInt(); prefs.putInt(  "sigLossStep",  signalLossDecelStep); }
+  if (server->hasArg("emergencyThreshold"))  { emergencyThreshold  = server->arg("emergencyThreshold").toFloat();prefs.putFloat("emergThresh",  emergencyThreshold); }
+  if (server->hasArg("expoVR"))              { expoVR              = server->arg("expoVR").toFloat();            prefs.putFloat("expoVR",       expoVR); }
+  if (server->hasArg("expoRL"))              { expoRL              = server->arg("expoRL").toFloat();            prefs.putFloat("expoRL",       expoRL); }
+  if (server->hasArg("deadzoneVR"))          { deadzoneVR          = server->arg("deadzoneVR").toFloat();        prefs.putFloat("deadzoneVR",   deadzoneVR); }
+  if (server->hasArg("deadzoneRL"))          { deadzoneRL          = server->arg("deadzoneRL").toFloat();        prefs.putFloat("deadzoneRL",   deadzoneRL); }
+  if (server->hasArg("hupeSeconds"))         { hupeSeconds         = server->arg("hupeSeconds").toInt();         prefs.putInt(  "hupeSeconds",  hupeSeconds); }
   server->send(200, "text/plain", "OK");
 }
 
@@ -341,6 +360,17 @@ void OnDataRecv(const esp_now_recv_info_t *recv_info, const uint8_t *incomingDat
 void setup() {
   Serial.begin(9600);
 
+  prefs.begin("config", false);
+  accelStep           = prefs.getInt(  "accelStep",           80);
+  decelStep           = prefs.getInt(  "decelStep",          120);
+  signalLossDecelStep = prefs.getInt(  "sigLossStep",        200);
+  emergencyThreshold  = prefs.getFloat("emergThresh",       0.98f);
+  expoVR              = prefs.getFloat("expoVR",            0.5f);
+  expoRL              = prefs.getFloat("expoRL",            0.5f);
+  deadzoneVR          = prefs.getFloat("deadzoneVR",        0.08f);
+  deadzoneRL          = prefs.getFloat("deadzoneRL",        0.08f);
+  hupeSeconds         = prefs.getInt(  "hupeSeconds",          10);
+
   // AP+STA: ESP-NOW auf STA, Webserver auf SoftAP (192.168.4.1)
   WiFi.mode(WIFI_AP_STA);
   WiFi.softAP(AP_SSID, AP_PASS, AP_CHANNEL);
@@ -381,8 +411,10 @@ void loop() {
       int rawRL = map(ctl->axisX(), -512, 511, -1300, 1300);
       targetVR = applyExpo(rawVR, 2047, expoVR, deadzoneVR);
       targetRL = applyExpo(rawRL, 1300, expoRL, deadzoneRL);
-      // A-Taste -> Hupe
-      digitalWrite(Hupe, ctl->a() ? HIGH : LOW);
+      // A-Taste -> Hupe (steigende Flanke triggert Timer)
+      bool btHupe = ctl->a();
+      if (btHupe && !prevBtHupe && !hupeActive) { hupeStartMillis = now; hupeActive = true; }
+      prevBtHupe = btHupe;
       break;
     }
   }
@@ -403,15 +435,25 @@ void loop() {
       if (!rlActive && rlRaw >= rlDeadHigh) rlActive = true;
       if ( rlActive && rlRaw <  rlDeadLow)  rlActive = false;
       targetRL = rlActive ? applyExpo(myData.msg_rl, 1300, expoRL, deadzoneRL) : 0;
-      digitalWrite(Hupe, myData.hupe ? HIGH : LOW);
+      // Hupe: steigende Flanke triggert Timer
+      if (myData.hupe && !prevHupe && !hupeActive) { hupeStartMillis = now; hupeActive = true; }
+      prevHupe = myData.hupe;
     }
   }
   liveSignalLost = signalLost;
 
   if (signalLost) {
-    digitalWrite(Hupe, LOW);
+    hupeActive = false;
     targetVR = 0;
     targetRL = 0;
+  }
+
+  // Hupe: läuft für hupeSeconds nach dem letzten Tastendruck
+  if (hupeActive && (now - hupeStartMillis < (unsigned long)(hupeSeconds) * 1000UL)) {
+    digitalWrite(Hupe, HIGH);
+  } else {
+    hupeActive = false;
+    digitalWrite(Hupe, LOW);
   }
 
   if (now - lastRampMillis >= RAMP_INTERVAL) {
