@@ -84,8 +84,12 @@ static const char INDEX_HTML[] PROGMEM = R"html(<!DOCTYPE html>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:monospace;background:#0d0d0d;color:#ccc;padding:16px;max-width:600px;margin:auto}
-h1{color:#f0c040;margin-bottom:16px;font-size:1.3em}
+h1{color:#f0c040;margin-bottom:12px;font-size:1.3em}
 h2{color:#40c0f0;font-size:.95em;margin:20px 0 10px;border-bottom:1px solid #333;padding-bottom:4px}
+.tabs{display:flex;gap:4px;margin-bottom:16px}
+.tab{padding:7px 18px;cursor:pointer;border:1px solid #333;border-radius:3px;font-family:monospace;font-size:.85em;color:#888;background:#111}
+.tab.active{color:#f0c040;border-color:#f0c040;background:#1a1a00}
+.page{display:none}.page.active{display:block}
 .grid{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:4px}
 .cell{background:#1a1a1a;border-radius:4px;padding:8px 4px;text-align:center}
 .cell-label{font-size:.65em;color:#666;margin-bottom:3px}
@@ -103,11 +107,21 @@ button:hover{background:#2a5a2a}
 button.sec{background:#1a1a3a;color:#88f;border-color:#88f}
 button.sec:hover{background:#2a2a5a}
 #msg{margin-top:10px;font-size:.8em;color:#8f8;min-height:1.2em}
+.info-row{margin:10px 0;font-size:.85em}
+.info-row .ilabel{color:#666;margin-bottom:3px}
+.info-row .ival{color:#40f0a0;word-break:break-all}
+.info-row .icode{color:#aaa;font-size:.8em;margin-top:2px}
 </style>
 </head>
 <body>
 <h1>Fahrende Theke</h1>
 
+<div class="tabs">
+  <div class="tab active" onclick="showTab('config')">Konfiguration</div>
+  <div class="tab" onclick="showTab('info')">Info</div>
+</div>
+
+<div id="page-config" class="page active">
 <h2>Live-Status</h2>
 <div class="grid">
   <div class="cell"><div class="cell-label">VR aktuell</div><div class="cell-val" id="s-vr">-</div></div>
@@ -139,10 +153,33 @@ button.sec:hover{background:#2a2a5a}
   <button class="sec" onclick="pull()">Vom Gerät laden</button>
 </div>
 <div id="msg"></div>
+</div>
+
+<div id="page-info" class="page">
+<h2>Receiver</h2>
+<div class="info-row">
+  <div class="ilabel">MAC-Adresse</div>
+  <div class="ival" id="i-rxmac">-</div>
+  <div class="icode" id="i-rxmac-c">-</div>
+</div>
+
+<h2>Aktiver Sender</h2>
+<div class="info-row">
+  <div class="ilabel">MAC-Adresse</div>
+  <div class="ival" id="i-txmac">-</div>
+  <div class="icode" id="i-txmac-c">-</div>
+</div>
+</div>
 
 <script>
 const PARAMS=['accelStep','decelStep','signalLossDecelStep','emergencyThreshold','expoVR','expoRL','deadzoneVR','deadzoneRL'];
+function showTab(t){
+  document.querySelectorAll('.tab').forEach((el,i)=>el.classList.toggle('active',['config','info'][i]===t));
+  document.querySelectorAll('.page').forEach(el=>el.classList.remove('active'));
+  document.getElementById('page-'+t).classList.add('active');
+}
 function dot(id,on){document.getElementById(id).className='dot'+(on?' on':'');}
+function macCode(m){return m==='—'?'—':'{0x'+m.split(':').join(', 0x')+'}';}
 function pollStatus(){
   fetch('/status').then(r=>r.json()).then(d=>{
     document.getElementById('s-vr').textContent=d.currentVR;
@@ -153,11 +190,17 @@ function pollStatus(){
     dot('s-espnow',d.hasSender);
     dot('s-sig',!d.signalLost);
     dot('s-emb',d.waitForNeutralVR);
+    const tx=d.senderMAC||'—';
+    document.getElementById('i-txmac').textContent=tx;
+    document.getElementById('i-txmac-c').textContent=macCode(tx);
   }).catch(()=>{});
 }
 function pull(){
   fetch('/status').then(r=>r.json()).then(d=>{
     PARAMS.forEach(k=>{const el=document.getElementById(k);if(el&&d[k]!==undefined)el.value=d[k];});
+    const rx=d.receiverMAC||'—';
+    document.getElementById('i-rxmac').textContent=rx;
+    document.getElementById('i-rxmac-c').textContent=macCode(rx);
   }).catch(()=>{});
 }
 function apply(){
@@ -180,20 +223,34 @@ void handleRoot() {
 }
 
 void handleStatus() {
-  char buf[400];
+  uint8_t rx[6];
+  WiFi.macAddress(rx);
+  char rxMac[18], txMac[18];
+  snprintf(rxMac, sizeof(rxMac), "%02X:%02X:%02X:%02X:%02X:%02X",
+           rx[0],rx[1],rx[2],rx[3],rx[4],rx[5]);
+  if (hasSender)
+    snprintf(txMac, sizeof(txMac), "%02X:%02X:%02X:%02X:%02X:%02X",
+             activeSenderMAC[0],activeSenderMAC[1],activeSenderMAC[2],
+             activeSenderMAC[3],activeSenderMAC[4],activeSenderMAC[5]);
+  else
+    snprintf(txMac, sizeof(txMac), "—");
+
+  char buf[500];
   snprintf(buf, sizeof(buf),
     "{\"currentVR\":%d,\"currentRL\":%d,\"targetVR\":%d,\"targetRL\":%d,"
     "\"btActive\":%s,\"hasSender\":%s,\"signalLost\":%s,\"waitForNeutralVR\":%s,"
     "\"accelStep\":%d,\"decelStep\":%d,\"signalLossDecelStep\":%d,"
     "\"emergencyThreshold\":%.3f,\"expoVR\":%.3f,\"expoRL\":%.3f,"
-    "\"deadzoneVR\":%.3f,\"deadzoneRL\":%.3f}",
+    "\"deadzoneVR\":%.3f,\"deadzoneRL\":%.3f,"
+    "\"receiverMAC\":\"%s\",\"senderMAC\":\"%s\"}",
     currentVR, currentRL, targetVR, targetRL,
     liveBtActive     ? "true" : "false",
     hasSender        ? "true" : "false",
     liveSignalLost   ? "true" : "false",
     waitForNeutralVR ? "true" : "false",
     accelStep, decelStep, signalLossDecelStep,
-    emergencyThreshold, expoVR, expoRL, deadzoneVR, deadzoneRL
+    emergencyThreshold, expoVR, expoRL, deadzoneVR, deadzoneRL,
+    rxMac, txMac
   );
   server->send(200, "application/json", buf);
 }

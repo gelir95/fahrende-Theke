@@ -93,13 +93,7 @@ pio run -e receiver
 
 ### MAC-Adresse auslesen
 
-Vor dem ersten Einsatz die MAC-Adresse des Receiver-Boards auslesen und in `src/sender/main.cpp` eintragen:
-
-```bash
-# tools/get_mac auf den Receiver flashen
-# MAC wird im Serial Monitor ausgegeben (115200 Baud)
-# Dann broadcastAddress in src/sender/main.cpp anpassen
-```
+Die MAC-Adresse des Receivers ist im **Info-Tab** der Weboberfläche (`192.168.4.1`) einsehbar — inklusive fertigem Code-Snippet für `broadcastAddress[]` in `src/sender/main.cpp`.
 
 ---
 
